@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: etcd
+  ports:
+    - name: client
+      port: 2379
+      targetPort: client

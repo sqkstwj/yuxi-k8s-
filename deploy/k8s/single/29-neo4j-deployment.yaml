@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: yuxi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      securityContext:
+        fsGroup: 7474
+      containers:
+        - name: neo4j
+          image: hub.uimpcloud.com/yuxi/neo4j:5.26
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: APP_NEO4J_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: NEO4J_USERNAME
+            - name: APP_NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: NEO4J_AUTH
+            - name: NEO4J_server_bolt_listen__address
+              value: 0.0.0.0:7687
+            - name: NEO4J_server_http_listen__address
+              value: 0.0.0.0:7474
+            - name: ENTITY_EMBEDDING
+              value: "true"
+          ports:
+            - containerPort: 7474
+              name: http
+            - containerPort: 7687
+              name: bolt
+          volumeMounts:
+            - name: neo4j-data
+              mountPath: /data
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - cypher-shell -a bolt://localhost:7687 -u "$APP_NEO4J_USERNAME" -p "$APP_NEO4J_PASSWORD" 'RETURN 1;' >/dev/null
+            initialDelaySeconds: 60
+            timeoutSeconds: 10
+            periodSeconds: 15
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - cypher-shell -a bolt://localhost:7687 -u "$APP_NEO4J_USERNAME" -p "$APP_NEO4J_PASSWORD" 'RETURN 1;' >/dev/null
+            initialDelaySeconds: 20
+            timeoutSeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - cypher-shell -a bolt://localhost:7687 -u "$APP_NEO4J_USERNAME" -p "$APP_NEO4J_PASSWORD" 'RETURN 1;' >/dev/null
+            initialDelaySeconds: 90
+            timeoutSeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: neo4j-data
+          persistentVolumeClaim:
+            claimName: neo4j-data

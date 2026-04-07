@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: yuxi-shared-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 20Gi

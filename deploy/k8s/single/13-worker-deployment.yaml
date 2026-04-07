@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: worker
+          image: hub.uimpcloud.com/yuxi/yuxi-api:0.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - uv
+            - run
+            - --no-dev
+            - arq
+            - server.worker_main.WorkerSettings
+          envFrom:
+            - configMapRef:
+                name: yuxi-config
+            - secretRef:
+                name: yuxi-secret
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/saves
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: yuxi-shared-data
+

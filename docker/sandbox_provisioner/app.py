@@ -468,6 +468,9 @@ class KubernetesProvisionerBackend:
         self._thread_pvc = os.getenv("THREAD_PVC", "yuxi-thread")
         self._node_host = os.getenv("NODE_HOST", "host.docker.internal")
         self._container_port = int(os.getenv("SANDBOX_CONTAINER_PORT", "8080"))
+        self._service_type = (os.getenv("K8S_SERVICE_TYPE", "NodePort") or "NodePort").strip()
+        self._image_pull_secret = (os.getenv("K8S_IMAGE_PULL_SECRET", "") or "").strip()
+        self._cluster_domain = (os.getenv("K8S_CLUSTER_DOMAIN", "cluster.local") or "cluster.local").strip()
 
         kubeconfig_path = os.getenv("KUBECONFIG_PATH")
         if kubeconfig_path:
@@ -480,6 +483,9 @@ class KubernetesProvisionerBackend:
 
         self._core_api = client.CoreV1Api()
         self._client = client
+
+    def _uses_cluster_ip(self) -> bool:
+        return self._service_type.lower() == "clusterip"
 
     @staticmethod
     def _pod_name(sandbox_id: str) -> str:
@@ -503,6 +509,11 @@ class KubernetesProvisionerBackend:
                     fs_group=0,
                     run_as_user=0,
                 ),
+                image_pull_secrets=[
+                    self._client.V1LocalObjectReference(name=self._image_pull_secret)
+                ]
+                if self._image_pull_secret
+                else None,
                 init_containers=[
                     self._client.V1Container(
                         name="init-user-data",
@@ -578,7 +589,7 @@ class KubernetesProvisionerBackend:
                 labels={"app": "yuxi-sandbox", "sandbox-id": sandbox_id},
             ),
             spec=self._client.V1ServiceSpec(
-                type="NodePort",
+                type="ClusterIP" if self._uses_cluster_ip() else "NodePort",
                 selector={"sandbox-id": sandbox_id},
                 ports=[
                     self._client.V1ServicePort(
@@ -648,7 +659,10 @@ class KubernetesProvisionerBackend:
         node_port = None
         if service.spec and service.spec.ports:
             node_port = service.spec.ports[0].node_port
-        if not node_port:
+        if self._uses_cluster_ip():
+            cluster_domain_suffix = f".{self._cluster_domain}" if self._cluster_domain else ""
+            sandbox_url = f"http://{service_name}.{self._namespace}.svc{cluster_domain_suffix}:{self._container_port}"
+        elif not node_port:
             sandbox_url = ""
         else:
             sandbox_url = f"http://{self._node_host}:{node_port}"

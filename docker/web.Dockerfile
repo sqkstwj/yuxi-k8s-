@@ -2,6 +2,7 @@
 FROM node:20-alpine AS development
 WORKDIR /app
 ENV TZ=Asia/Shanghai
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 # 安装 pnpm
 RUN npm install -g pnpm@latest
@@ -11,7 +12,7 @@ COPY ./web/package*.json ./
 COPY ./web/pnpm-lock.yaml* ./
 
 # 安装依赖
-RUN pnpm install --registry=https://registry.npmmirror.com
+RUN pnpm install --registry=${NPM_REGISTRY}
 
 # 复制源代码
 COPY ./web .
@@ -24,6 +25,11 @@ EXPOSE 5173
 # 生产阶段
 FROM node:20-alpine AS build-stage
 WORKDIR /app
+ARG VITE_LITE_MODE=false
+ARG VITE_USE_RUNS_API=false
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ENV VITE_LITE_MODE=${VITE_LITE_MODE}
+ENV VITE_USE_RUNS_API=${VITE_USE_RUNS_API}
 
 # 安装 pnpm
 RUN npm install -g pnpm@latest
@@ -33,7 +39,7 @@ COPY ./web/package*.json ./
 COPY ./web/pnpm-lock.yaml* ./
 
 # 安装依赖
-RUN pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
+RUN pnpm install --frozen-lockfile --registry=${NPM_REGISTRY}
 
 # 复制源代码并构建
 COPY ./web .

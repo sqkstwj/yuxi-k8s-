@@ -1,0 +1,1041 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: yuxi-registry-secret
+  namespace: yuxi
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: |
+    {
+      "auths": {
+        "hub.uimpcloud.com": {
+          "username": "<CHANGE_ME_REGISTRY_USERNAME>",
+          "password": "<CHANGE_ME_REGISTRY_PASSWORD>",
+          "auth": "<CHANGE_ME_BASE64_USERNAME_COLON_PASSWORD>"
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yuxi-config
+  namespace: yuxi
+data:
+  SAVE_DIR: /app/saves
+  LITE_MODE: "false"
+  RUNNING_IN_DOCKER: "true"
+  MODEL_DIR_IN_DOCKER: /models
+  PYTHONPATH: /app/package
+  HOST_IP: ""
+  REDIS_URL: redis://redis:6379/0
+  MINIO_URI: http://minio:9000
+  NEO4J_URI: bolt://neo4j:7687
+  MILVUS_URI: http://milvus:19530
+  SUMMARY_LANGUAGE: Chinese
+  SANDBOX_PROVIDER: provisioner
+  SANDBOX_PROVISIONER_URL: http://sandbox-provisioner:8002
+  SANDBOX_VIRTUAL_PATH_PREFIX: /home/gem/user-data
+  SANDBOX_EXEC_TIMEOUT_SECONDS: "180"
+  SANDBOX_MAX_OUTPUT_BYTES: "262144"
+  SANDBOX_KEEPALIVE_INTERVAL_SECONDS: "30"
+  NO_PROXY: localhost,127.0.0.1,postgres,redis,minio,neo4j,milvus,etcd,sandbox-provisioner
+  no_proxy: localhost,127.0.0.1,postgres,redis,minio,neo4j,milvus,etcd,sandbox-provisioner
+  PROVISIONER_BACKEND: kubernetes
+  SANDBOX_IMAGE: hub.uimpcloud.com/yuxi/all-in-one-sandbox:0.6.0
+  SANDBOX_CONTAINER_PORT: "8080"
+  SANDBOX_HEALTH_TIMEOUT_SECONDS: "300"
+  SANDBOX_IDLE_TIMEOUT_SECONDS: "120"
+  SANDBOX_IDLE_CHECK_INTERVAL_SECONDS: "10"
+  K8S_NAMESPACE: yuxi
+  THREAD_PVC: yuxi-shared-data
+  SKILLS_PVC: yuxi-shared-data
+  K8S_SERVICE_TYPE: ClusterIP
+  K8S_CLUSTER_DOMAIN: cluster.local
+  K8S_IMAGE_PULL_SECRET: yuxi-registry-secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: yuxi-secret
+  namespace: yuxi
+type: Opaque
+stringData:
+  POSTGRES_USER: "<CHANGE_ME_POSTGRES_USER>"
+  POSTGRES_PASSWORD: "<CHANGE_ME_POSTGRES_PASSWORD>"
+  POSTGRES_DB: "<CHANGE_ME_POSTGRES_DB>"
+  POSTGRES_URL: "postgresql+asyncpg://<CHANGE_ME_POSTGRES_USER>:<CHANGE_ME_POSTGRES_PASSWORD>@postgres:5432/<CHANGE_ME_POSTGRES_DB>"
+  NEO4J_USERNAME: "<CHANGE_ME_NEO4J_USERNAME>"
+  NEO4J_PASSWORD: "<CHANGE_ME_NEO4J_PASSWORD>"
+  MINIO_ACCESS_KEY: "<CHANGE_ME_MINIO_ACCESS_KEY>"
+  MINIO_SECRET_KEY: "<CHANGE_ME_MINIO_SECRET_KEY>"
+  SILICONFLOW_API_KEY: "<CHANGE_ME_SILICONFLOW_API_KEY>"
+  TAVILY_API_KEY: "<CHANGE_ME_TAVILY_API_KEY>"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neo4j-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: etcd-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: yuxi-shared-data
+  namespace: yuxi
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: csi-nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yuxi-provisioner
+  namespace: yuxi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: yuxi-provisioner
+  namespace: yuxi
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: yuxi-provisioner
+  namespace: yuxi
+subjects:
+  - kind: ServiceAccount
+    name: yuxi-provisioner
+    namespace: yuxi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: yuxi-provisioner
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: postgres
+          image: hub.uimpcloud.com/yuxi/postgres:16
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: redis
+          image: hub.uimpcloud.com/yuxi/redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - redis-server
+            - --appendonly
+            - "yes"
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: api
+    - name: console
+      port: 9001
+      targetPort: console
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: minio
+          image: hub.uimpcloud.com/yuxi/minio:RELEASE.2023-03-20T20-16-18Z
+          imagePullPolicy: IfNotPresent
+          command:
+            - minio
+            - server
+            - /data
+            - --address
+            - :9000
+            - --console-address
+            - :9001
+          env:
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: MINIO_SECRET_KEY
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: neo4j
+  ports:
+    - name: http
+      port: 7474
+      targetPort: http
+    - name: bolt
+      port: 7687
+      targetPort: bolt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neo4j
+  namespace: yuxi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      securityContext:
+        fsGroup: 7474
+      containers:
+        - name: neo4j
+          image: hub.uimpcloud.com/yuxi/neo4j:5.26
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: APP_NEO4J_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: NEO4J_USERNAME
+            - name: APP_NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: NEO4J_AUTH
+            - name: NEO4J_server_bolt_listen__address
+              value: 0.0.0.0:7687
+            - name: NEO4J_server_http_listen__address
+              value: 0.0.0.0:7474
+            - name: ENTITY_EMBEDDING
+              value: "true"
+          ports:
+            - containerPort: 7474
+              name: http
+            - containerPort: 7687
+              name: bolt
+          volumeMounts:
+            - name: neo4j-data
+              mountPath: /data
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - cypher-shell -a bolt://localhost:7687 -u "$APP_NEO4J_USERNAME" -p "$APP_NEO4J_PASSWORD" 'RETURN 1;' >/dev/null
+            initialDelaySeconds: 60
+            timeoutSeconds: 10
+            periodSeconds: 15
+            failureThreshold: 20
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - cypher-shell -a bolt://localhost:7687 -u "$APP_NEO4J_USERNAME" -p "$APP_NEO4J_PASSWORD" 'RETURN 1;' >/dev/null
+            initialDelaySeconds: 20
+            timeoutSeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - cypher-shell -a bolt://localhost:7687 -u "$APP_NEO4J_USERNAME" -p "$APP_NEO4J_PASSWORD" 'RETURN 1;' >/dev/null
+            initialDelaySeconds: 90
+            timeoutSeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: neo4j-data
+          persistentVolumeClaim:
+            claimName: neo4j-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: etcd
+  ports:
+    - name: client
+      port: 2379
+      targetPort: client
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etcd
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      enableServiceLinks: false
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: etcd
+          image: hub.uimpcloud.com/yuxi/etcd:v3.5.5
+          imagePullPolicy: IfNotPresent
+          command:
+            - etcd
+            - --advertise-client-urls=http://etcd:2379
+            - --listen-client-urls
+            - http://0.0.0.0:2379
+            - --data-dir
+            - /etcd
+          env:
+            - name: ETCD_AUTO_COMPACTION_MODE
+              value: revision
+            - name: ETCD_AUTO_COMPACTION_RETENTION
+              value: "1000"
+            - name: ETCD_QUOTA_BACKEND_BYTES
+              value: "4294967296"
+            - name: ETCD_SNAPSHOT_COUNT
+              value: "50000"
+            - name: ETCDCTL_API
+              value: "3"
+          ports:
+            - containerPort: 2379
+              name: client
+          volumeMounts:
+            - name: etcd-data
+              mountPath: /etcd
+          readinessProbe:
+            exec:
+              command:
+                - etcdctl
+                - --endpoints=http://127.0.0.1:2379
+                - endpoint
+                - health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            exec:
+              command:
+                - etcdctl
+                - --endpoints=http://127.0.0.1:2379
+                - endpoint
+                - health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: etcd-data
+          persistentVolumeClaim:
+            claimName: etcd-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: milvus
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: milvus
+  ports:
+    - name: milvus
+      port: 19530
+      targetPort: milvus
+    - name: health
+      port: 9091
+      targetPort: health
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus
+  namespace: yuxi
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: milvus
+  template:
+    metadata:
+      labels:
+        app: milvus
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: milvus
+          image: hub.uimpcloud.com/yuxi/milvus:v2.5.6
+          imagePullPolicy: IfNotPresent
+          command:
+            - milvus
+            - run
+            - standalone
+          env:
+            - name: ETCD_ENDPOINTS
+              value: etcd:2379
+            - name: MINIO_ADDRESS
+              value: minio:9000
+            - name: MINIO_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: yuxi-secret
+                  key: MINIO_SECRET_KEY
+            - name: MILVUS_LOG_LEVEL
+              value: error
+          ports:
+            - containerPort: 19530
+              name: milvus
+            - containerPort: 9091
+              name: health
+          volumeMounts:
+            - name: milvus-data
+              mountPath: /var/lib/milvus
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: milvus-data
+          persistentVolumeClaim:
+            claimName: milvus-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-provisioner
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: sandbox-provisioner
+  ports:
+    - name: http
+      port: 8002
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-provisioner
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: sandbox-provisioner
+  template:
+    metadata:
+      labels:
+        app: sandbox-provisioner
+    spec:
+      serviceAccountName: yuxi-provisioner
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: sandbox-provisioner
+          image: hub.uimpcloud.com/yuxi/yuxi-sandbox-provisioner:0.6.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: yuxi-config
+          ports:
+            - containerPort: 8002
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 5050
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: api
+          image: hub.uimpcloud.com/yuxi/yuxi-api:0.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - uv
+            - run
+            - --no-dev
+            - uvicorn
+            - server.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "5050"
+          envFrom:
+            - configMapRef:
+                name: yuxi-config
+            - secretRef:
+                name: yuxi-secret
+          ports:
+            - containerPort: 5050
+              name: http
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/saves
+          startupProbe:
+            httpGet:
+              path: /api/system/health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/system/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/system/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: yuxi-shared-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: worker
+          image: hub.uimpcloud.com/yuxi/yuxi-api:0.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - uv
+            - run
+            - --no-dev
+            - arq
+            - server.worker_main.WorkerSettings
+          envFrom:
+            - configMapRef:
+                name: yuxi-config
+            - secretRef:
+                name: yuxi-secret
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/saves
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: yuxi-shared-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: yuxi
+spec:
+  type: ClusterIP
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: web
+          image: hub.uimpcloud.com/yuxi/yuxi-web:0.6.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: NODE_ENV
+              value: production
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: yuxi-web
+  namespace: yuxi
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80

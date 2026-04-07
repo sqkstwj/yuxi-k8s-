@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-provisioner
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: sandbox-provisioner
+  template:
+    metadata:
+      labels:
+        app: sandbox-provisioner
+    spec:
+      serviceAccountName: yuxi-provisioner
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: sandbox-provisioner
+          image: hub.uimpcloud.com/yuxi/yuxi-sandbox-provisioner:0.6.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: yuxi-config
+          ports:
+            - containerPort: 8002
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+

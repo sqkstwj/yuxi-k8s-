@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yuxi-provisioner
+  namespace: yuxi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: yuxi-provisioner
+  namespace: yuxi
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: yuxi-provisioner
+  namespace: yuxi
+subjects:
+  - kind: ServiceAccount
+    name: yuxi-provisioner
+    namespace: yuxi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: yuxi-provisioner
+

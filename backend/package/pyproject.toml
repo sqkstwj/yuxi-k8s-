@@ -70,13 +70,24 @@ dependencies = [
     "tenacity>=8.0.0",
     "tomli",
     "tomli-w",
-    "torch>=2.8.0",
-    "torchvision==0.23",
+    "torch==2.8.0+cpu",
+    "torchvision==0.23.0+cpu",
     "tqdm>=4.66.4",
     "typer>=0.16.0",
     "unstructured>=0.17.2",
     "wcmatch>=8.0.0",
 ]
+
+[tool.uv]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
 
 [tool.setuptools]
 include-package-data = true

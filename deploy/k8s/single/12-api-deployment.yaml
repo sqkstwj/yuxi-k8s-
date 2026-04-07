@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: yuxi
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      imagePullSecrets:
+        - name: yuxi-registry-secret
+      containers:
+        - name: api
+          image: hub.uimpcloud.com/yuxi/yuxi-api:0.6.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - uv
+            - run
+            - --no-dev
+            - uvicorn
+            - server.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "5050"
+          envFrom:
+            - configMapRef:
+                name: yuxi-config
+            - secretRef:
+                name: yuxi-secret
+          ports:
+            - containerPort: 5050
+              name: http
+          volumeMounts:
+            - name: shared-data
+              mountPath: /app/saves
+          startupProbe:
+            httpGet:
+              path: /api/system/health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/system/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/system/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: yuxi-shared-data
+

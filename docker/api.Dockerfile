@@ -8,11 +8,13 @@ COPY --from=node:20-slim /usr/local/share /usr/local/share
 
 # 设置工作目录
 WORKDIR /app
+ARG UV_DEFAULT_INDEX=https://pypi.org/simple
 
 # 环境变量设置
 ENV TZ=Asia/Shanghai \
     UV_PROJECT_ENVIRONMENT="/usr/local" \
     UV_COMPILE_BYTECODE=1 \
+    UV_HTTP_TIMEOUT=120 \
     DEBIAN_FRONTEND=noninteractive
 
 # 设置 npm 镜像源，为 MCP 和 Skills 安装依赖
@@ -43,14 +45,17 @@ RUN set -ex \
 COPY ../backend/pyproject.toml /app/pyproject.toml
 COPY ../backend/.python-version /app/.python-version
 COPY ../backend/uv.lock /app/uv.lock
+COPY ../README.md /app/README.md
+COPY ../backend/package /app/package
 
-# 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 先在容器内基于指定索引重建 lock，再执行安装，避免宿主机提交的 uv.lock
+# 把第三方包下载地址固定到旧镜像源。
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --group test --no-dev --frozen
+    uv lock --default-index "${UV_DEFAULT_INDEX}" --refresh \
+    && uv sync --default-index "${UV_DEFAULT_INDEX}" --group test --no-dev --frozen
 
 # 激活虚拟环境并添加到PATH
 ENV PATH="/app/.venv/bin:$PATH"
 
 # 复制代码到容器中
-COPY ../backend/package /app/package
 COPY ../backend/server /app/server
