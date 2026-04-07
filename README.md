@@ -1,28 +1,43 @@
-# 项目改造说明
+# Yuxi Kubernetes 改造说明
 
-## 1. 项目来源
+> 基于开源项目 [xerrors/Yuxi](https://github.com/xerrors/Yuxi) 的企业化部署改造版本。
 
-本项目基于开源项目 **Yuxi** 二次改造，原始仓库为：
+## 项目定位
 
-- Upstream: `https://github.com/xerrors/Yuxi`
+本仓库不是对 Yuxi 核心业务逻辑的大规模重写，而是在保留其原有 Agent、RAG、知识图谱、前后端主体能力的基础上，重点补齐了以下内容：
 
-当前仓库在保留 Yuxi 原有 Agent、RAG、知识图谱与前后端主体能力的基础上，重点补齐了 **面向公司 Kubernetes 环境的部署能力、镜像构建适配能力，以及全量知识库模式运行所需的中间件接入能力**。
+- 面向公司 Kubernetes 环境的部署能力
+- 面向私有镜像仓库的镜像构建与拉取适配
+- 从 `lite` 模式升级到 `full mode` 所需的中间件接入
+- `sandbox-provisioner` 在 Kubernetes 集群内的运行适配
+- 更适合企业网络和 CPU 节点环境的构建参数与依赖配置
 
-本说明重点记录我在开源项目基础上做过的本地化修改和新增内容，不重复介绍上游项目原生功能。
+## 改造目标
 
-## 2. 改造目标
+本次改造主要解决了开源项目在企业集群落地时的几个关键问题：
 
-本次改造主要围绕以下目标展开：
+1. 将项目从本地 Docker / Compose 运行方式迁移到公司 Kubernetes 环境。
+2. 支持私有镜像仓库、镜像拉取凭据、Ingress、PVC、共享存储等企业部署要素。
+3. 支持在 K8s 中启用 `full mode`，补齐 Neo4j、Milvus、etcd 等中间件。
+4. 让 `sandbox-provisioner` 适配 Kubernetes 集群内部网络，而不是依赖本地 NodePort 假设。
+5. 优化镜像构建链路，适配受限网络环境和 CPU 节点部署。
 
-1. 让项目可以从原本偏本地 Docker / Compose 的运行方式，迁移到公司 Kubernetes 环境中稳定部署。
-2. 支持公司私有镜像仓库、镜像拉取凭据、Ingress 暴露、持久化存储等企业部署要素。
-3. 将原本的 `lite` 运行模式扩展为可在 Kubernetes 中启用的 **full mode**，补齐 Neo4j、Milvus、etcd 等中间件。
-4. 让 `sandbox-provisioner` 真正适配 Kubernetes 集群内部网络，而不是只依赖 NodePort / 本地开发假设。
-5. 优化镜像构建链路，使其更适合受限网络、镜像源替换和 CPU 环境部署。
+## 改动总览
 
-## 3. 主要新增内容
+| 模块 | 改造内容 | 价值 |
+| --- | --- | --- |
+| Kubernetes 部署 | 新增 `deploy/k8s/single/` 全套 YAML | 可以直接在公司 K8s 环境部署 |
+| Full Mode | 新增 Neo4j / Milvus / etcd 资源与升级说明 | 补齐知识库、图谱、评估能力 |
+| 私有镜像仓库 | 统一改为公司私有镜像地址，并增加 `imagePullSecrets` | 适配企业镜像分发方式 |
+| Sandbox | `sandbox-provisioner` 支持 `ClusterIP`、集群域名、镜像拉取密钥 | 提升 Agent 沙箱在 K8s 内部可用性 |
+| 存储 | 新增数据库、中间件和共享目录 PVC | 满足集群持久化与共享文件需求 |
+| 网络 | 增加 Web Ingress 与 API NodePort 方案 | 便于对外访问与调试 |
+| 构建链路 | Dockerfile 支持可配置镜像源、索引源和功能开关 | 更适合企业网络与 CI |
+| 依赖 | 将 PyTorch 调整为 CPU 版本 | 降低镜像体积与节点要求 |
 
-### 3.1 新增整套 Kubernetes 单命名空间部署清单
+## 主要新增内容
+
+### 1. 新增整套 Kubernetes 单命名空间部署清单
 
 新增目录：
 
@@ -30,35 +45,31 @@
 
 该目录下新增了完整的 Kubernetes 资源文件，覆盖：
 
-- 命名空间
+- Namespace
 - 镜像拉取 Secret
-- 应用配置 ConfigMap
-- 应用 Secret
+- 应用 ConfigMap / Secret
 - PostgreSQL / Redis / MinIO / Neo4j / etcd / Milvus 的 PVC、Service、Deployment
-- `api` / `worker` / `web` / `sandbox-provisioner` 的 Deployment 与 Service
+- `web` / `api` / `worker` / `sandbox-provisioner` 的 Deployment 与 Service
 - Ingress
 - `sandbox-provisioner` 所需 RBAC
-- 聚合版 YAML（`90-base.yaml`、`91-middleware.yaml`、`92-app.yaml`、`99-single-stack.yaml`）
+- 聚合版 YAML：`90-base.yaml`、`91-middleware.yaml`、`92-app.yaml`、`99-single-stack.yaml`
 
-这部分改造把原项目从“能本地跑”扩展到了“能在公司集群里完整落地”。
+这部分改造把项目从“本地可运行”推进到了“集群可交付”。
 
-### 3.2 新增 Full Mode 升级方案
+### 2. 新增 Full Mode 升级方案
 
 新增文件：
 
 - `deploy/k8s/single/FULL-MODE.md`
 
-该文档描述了如何将当前部署从 `lite` 模式切换为 `full mode`，包括：
+该文档描述了从 `lite` 模式切换到 `full mode` 的完整流程，包括：
 
-- 新增 Neo4j、Milvus、etcd 三类中间件
-- 镜像准备要求
+- Neo4j、Milvus、etcd 的镜像准备
 - 配置项变化
 - 部署顺序
 - 升级后的校验方式
 
-这使项目不仅能在 K8s 中启动基础能力，也能完整启用知识库、图谱、评估等高级功能。
-
-### 3.3 新增 K8s 部署使用文档
+### 3. 新增 K8s 部署使用文档
 
 新增文件：
 
@@ -67,35 +78,33 @@
 该文档补充了：
 
 - 单命名空间部署结构说明
-- 资源拆分方式
-- 配置项准备说明
+- 配置准备方式
 - PVC 与共享存储要求
 - 手动 `kubectl apply` 顺序
 - 聚合 YAML 的使用方式
-- 基础验证命令
+- 部署后的基础验证方法
 
-这部分属于运维交付文档，降低了后续部署和接手成本。
+## 关键改造点
 
-## 4. 我对原项目做过的关键修改
+### 1. 默认 K8s 配置切换为 Full Mode
 
-### 4.1 将默认 K8s 配置切换为 Full Mode
+在 K8s 配置中显式设置：
 
-在新增的 K8s ConfigMap 中，我显式将：
-
-- `LITE_MODE` 设置为 `false`
-- `PROVISIONER_BACKEND` 设置为 `kubernetes`
-- `K8S_SERVICE_TYPE` 设置为 `ClusterIP`
-- `K8S_IMAGE_PULL_SECRET`、`K8S_CLUSTER_DOMAIN` 等集群运行参数补齐
+- `LITE_MODE=false`
+- `PROVISIONER_BACKEND=kubernetes`
+- `K8S_SERVICE_TYPE=ClusterIP`
+- `K8S_IMAGE_PULL_SECRET`
+- `K8S_CLUSTER_DOMAIN`
 
 对应文件：
 
 - `deploy/k8s/single/02-app-configmap.yaml`
 
-这意味着部署到公司集群后，系统默认按完整功能模式运行，而不是上游默认的轻量模式。
+这意味着项目部署到公司集群后，默认按完整能力模式运行，而不是沿用上游偏轻量的默认假设。
 
-### 4.2 新增对公司私有镜像仓库的适配
+### 2. 适配公司私有镜像仓库
 
-我把部署镜像统一指向公司私有镜像仓库，例如：
+部署镜像统一改为公司私有镜像仓库，例如：
 
 - `hub.uimpcloud.com/yuxi/yuxi-api:0.6.0`
 - `hub.uimpcloud.com/yuxi/yuxi-web:0.6.0`
@@ -103,166 +112,162 @@
 - `hub.uimpcloud.com/yuxi/neo4j:5.26`
 - `hub.uimpcloud.com/yuxi/milvus:v2.5.6`
 
-同时增加了：
+并配套增加：
 
 - `imagePullSecrets`
 - 私有仓库认证 Secret 模板
 
-这样项目可以直接使用公司镜像仓库中的构建产物，而不是依赖公网镜像。
+这样项目可以直接使用企业内部镜像，而不是依赖公网镜像源。
 
-### 4.3 为 sandbox-provisioner 增加 Kubernetes 集群内服务发现能力
+### 3. 改造 sandbox-provisioner 的 Kubernetes 运行方式
 
-我修改了 `docker/sandbox_provisioner/app.py`，让 Kubernetes backend 支持：
+修改文件：
 
-- 自定义 `K8S_SERVICE_TYPE`
-- 自定义 `K8S_IMAGE_PULL_SECRET`
-- 自定义 `K8S_CLUSTER_DOMAIN`
+- `docker/sandbox_provisioner/app.py`
+
+新增支持：
+
+- `K8S_SERVICE_TYPE`
+- `K8S_IMAGE_PULL_SECRET`
+- `K8S_CLUSTER_DOMAIN`
 - 为动态创建的 sandbox Pod 注入 `imagePullSecrets`
-- 在 `ClusterIP` 模式下生成集群内可访问的 Service 地址，而不是只依赖 `NodePort`
+- 在 `ClusterIP` 模式下生成集群内可访问的 Service 地址
 
-这项改动的意义很大：
+这部分改造解决了上游实现更偏向本地 / NodePort 的限制，使 Agent 沙箱能力可以更自然地运行在 K8s 集群内部。
 
-- 上游逻辑更偏向本地 / NodePort 场景
-- 公司集群内部更适合用 `ClusterIP + svc DNS`
-- 动态 sandbox Pod 在私有镜像仓库下也需要拉取密钥
+### 4. 增加 sandbox-provisioner 所需 RBAC
 
-这部分改造直接提升了 Agent 沙箱能力在 K8s 内部的可用性。
+新增文件：
 
-### 4.4 新增 sandbox-provisioner 的 RBAC 资源
+- `deploy/k8s/single/08-sandbox-rbac.yaml`
 
-为了让 `sandbox-provisioner` 能在命名空间内动态创建和删除 Pod / Service，我新增了：
+新增资源：
 
 - ServiceAccount
 - Role
 - RoleBinding
 
-对应文件：
+用于支持 `sandbox-provisioner` 在命名空间内动态创建、查询和删除 Pod / Service。
 
-- `deploy/k8s/single/08-sandbox-rbac.yaml`
+### 5. 新增共享存储与中间件持久化设计
 
-这是从“单机开发”走向“集群调度”必须补上的权限配置。
+新增 PVC 覆盖：
 
-### 4.5 新增共享存储设计
+- PostgreSQL
+- Redis
+- MinIO
+- Neo4j
+- etcd
+- Milvus
+- 共享目录 PVC
 
-我为项目增加了面向 K8s 的持久化方案：
+其中共享目录 PVC 用于支撑：
 
-- PostgreSQL 数据 PVC
-- Redis 数据 PVC
-- MinIO 数据 PVC
-- Neo4j 数据 PVC
-- etcd 数据 PVC
-- Milvus 数据 PVC
-- 共享目录 PVC（供 `/app/saves`、线程数据、Skills 等复用）
+- `/app/saves`
+- 线程数据
+- Skills
+- 沙箱共享工作目录
 
-其中共享存储是重点，因为：
+这使项目更符合集群部署场景下的持久化与共享文件需求。
 
-- `api` 与 `worker` 都依赖 `/app/saves`
-- sandbox 运行也需要访问共享工作目录
-- 这比上游偏本地文件系统的假设更适合集群部署
-
-### 4.6 新增 API NodePort 暴露方式
-
-我额外增加了：
-
-- `deploy/k8s/single/23-api-nodeport-service.yaml`
-
-用于在特定场景下直接通过 NodePort 访问 API，便于调试、联调或临时暴露后端接口。
-
-### 4.7 新增 Web Ingress 暴露方案
+### 6. 增加 Web Ingress 与 API NodePort
 
 新增文件：
 
 - `deploy/k8s/single/15-web-ingress.yaml`
+- `deploy/k8s/single/23-api-nodeport-service.yaml`
 
-补齐了基于 Nginx Ingress 的访问入口，并加入了：
+分别用于：
 
-- 请求体大小限制
-- 读写超时配置
+- 通过 Nginx Ingress 对外暴露 Web
+- 在需要时通过 NodePort 直接访问 API，便于调试或联调
 
-这使前端可以更符合企业网络环境地对外暴露，而不是只停留在本地端口映射模式。
+## 对镜像构建流程的修改
 
-## 5. 对镜像构建流程的修改
+### API 镜像
 
-### 5.1 API 镜像构建增强
+修改文件：
 
-我修改了 `docker/api.Dockerfile`，主要包括：
+- `docker/api.Dockerfile`
 
-- 增加 `UV_DEFAULT_INDEX` 构建参数
+主要改动：
+
+- 增加 `UV_DEFAULT_INDEX`
 - 增加 `UV_HTTP_TIMEOUT`
 - 在容器内重新执行 `uv lock` 与 `uv sync`
 - 提前复制 `README.md` 和 `backend/package`
 
-目的主要是：
+目的：
 
 - 提升受限网络环境下的依赖安装稳定性
-- 允许通过自定义索引源构建镜像
-- 避免直接依赖宿主机提交的 lock 结果
+- 支持通过自定义 Python 索引源构建镜像
+- 减少对宿主机 lock 结果的强依赖
 
-### 5.2 Web 镜像构建增强
+### Web 镜像
 
-我修改了 `docker/web.Dockerfile`，主要包括：
+修改文件：
 
-- 增加 `NPM_REGISTRY` 构建参数
+- `docker/web.Dockerfile`
+
+主要改动：
+
+- 增加 `NPM_REGISTRY`
 - 增加 `VITE_LITE_MODE`
 - 增加 `VITE_USE_RUNS_API`
-- 将 `pnpm install` 的 registry 改为可配置
+- `pnpm install` 改为可配置 registry
 
-目的主要是：
+目的：
 
-- 适配国内 / 内网镜像源
-- 允许构建不同运行模式的前端镜像
-- 为后续集群环境下的前端功能开关预留空间
+- 适配企业内网 / 国内镜像源
+- 支持构建不同运行模式的前端镜像
+- 为后续前端功能开关预留参数入口
 
-### 5.3 sandbox-provisioner 镜像构建增强
+### sandbox-provisioner 镜像
 
-我修改了 `docker/sandbox_provisioner/Dockerfile`，增加：
+修改文件：
 
-- `PIP_INDEX_URL` 构建参数
+- `docker/sandbox_provisioner/Dockerfile`
 
-目的是让该镜像在受限网络环境下也能通过指定 Python 包索引完成构建。
+主要改动：
 
-## 6. 对依赖的修改
+- 增加 `PIP_INDEX_URL`
 
-### 6.1 将 PyTorch 调整为 CPU 版本
+目的：
 
-我修改了 `backend/package/pyproject.toml`：
+- 支持在受限网络环境下通过指定包索引完成镜像构建
 
-- 将 `torch` 切换为 `2.8.0+cpu`
-- 将 `torchvision` 切换为 `0.23.0+cpu`
-- 显式增加 `pytorch-cpu` 索引源
+## 对依赖的修改
 
-这样做的主要原因是：
+### PyTorch 调整为 CPU 版本
 
-- 公司 K8s 部署场景未必具备 GPU
-- CPU 版本更适合普通节点和通用镜像构建
-- 能降低镜像体积和依赖复杂度
+修改文件：
 
-## 7. 与上游相比，新增了哪些可直接交付的成果
+- `backend/package/pyproject.toml`
 
-基于本次改造，项目相对于上游新增了以下“可落地交付物”：
+主要改动：
+
+- `torch` 调整为 `2.8.0+cpu`
+- `torchvision` 调整为 `0.23.0+cpu`
+- 增加 `pytorch-cpu` 索引源
+
+目的：
+
+- 更适配普通 Kubernetes 节点
+- 降低镜像体积和依赖复杂度
+- 避免默认依赖 GPU 环境
+
+## 相对上游新增的可交付成果
+
+基于本次改造，本仓库相对上游新增了以下可以直接落地的内容：
 
 1. 一套可直接部署到 Kubernetes 的 YAML 资源。
-2. 一套完整的 full mode 中间件部署方案。
+2. 一套从 `lite` 升级到 `full mode` 的中间件部署方案。
 3. 一套适配私有镜像仓库的镜像引用方式。
 4. 一套适配企业网络环境的镜像构建参数体系。
 5. 一套适配 Kubernetes 内部网络的 sandbox-provisioner 运行方案。
-6. 一套部署说明和升级说明文档。
+6. 一套可交付给运维或后续维护者的部署与升级文档。
 
-## 8. 当前改造的重点价值
-
-总结来说，这次二次开发并不是去重写 Yuxi 的业务逻辑，而是围绕“**让开源项目能够真正落地到公司 K8s 环境**”做了工程化改造，重点价值包括：
-
-- 把项目从开发态推进到可部署态
-- 把 Lite 模式推进到 Full Mode
-- 把本地 Docker 假设推进到 K8s 集群假设
-- 把公网镜像依赖推进到企业私有仓库依赖
-- 把单机调试方式推进到标准化集群运维方式
-
-## 9. 主要改动文件清单
-
-### 新增目录
-
-- `deploy/k8s/single/`
+## 关键文件
 
 ### 关键修改文件
 
@@ -286,11 +291,22 @@
 - `deploy/k8s/single/FULL-MODE.md`
 - `deploy/k8s/single/README.md`
 
-## 10. 备注
+## 当前版本的核心价值
 
-由于本仓库包含 Kubernetes 部署模板与企业环境适配内容，后续如果继续演进，建议将“上游同步”和“企业本地化改造”分开管理：
+这次二次开发的重点，不是重写 Yuxi 的业务能力，而是围绕以下方向完成工程化落地：
 
-- 上游功能跟进保持最小侵入
-- 企业部署相关改造尽量集中在 `deploy/`、Dockerfile 和配置适配层
+- 从开发态推进到可部署态
+- 从 Lite 模式推进到 Full Mode
+- 从本地 Docker 假设推进到 Kubernetes 集群假设
+- 从公网镜像依赖推进到企业私有仓库依赖
+- 从单机调试方式推进到标准化集群运维方式
 
-这样后续继续升级上游版本时，冲突会更少，维护成本也更低。
+## 后续维护建议
+
+建议后续继续保持以下边界：
+
+- 上游功能同步保持最小侵入
+- 企业部署相关内容集中在 `deploy/`、Dockerfile 和配置适配层
+- Secret 与真实环境配置不要直接写入公开仓库
+
+这样后续升级上游版本时，冲突更少，维护成本也更低。
